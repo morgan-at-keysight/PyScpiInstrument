@@ -87,14 +87,12 @@ class PyScpiInstrument(Instrument):
         :param query: SCPI query string.
         """
 
-        if datatype == 'b':
-            return self._io.ScpiQueryBlock(query)
-        elif datatype == 'B':
-            return self._io.ScpiQueryBlock(query)
+        if datatype == 'b' or datatype == 'B':
+            return bytes(self._io.ScpiQueryBlock(query))
         elif datatype == 'f':
-            return self._io.ScpiQueryBlock[Single](query)
+            return list(self._io.ScpiQueryBlock[Single](query))
         elif datatype == 'd':
-            return self._io.ScpiQueryBlock[Double](query)
+            return list(self._io.ScpiQueryBlock[Double](query))
         else:
             raise TypeError('Invalid data type selected.')
 
