@@ -53,9 +53,33 @@ class PyScpiInstrument(Instrument):
         timeout.AddAttribute(OpenTap.DisplayAttribute, "IO Timeout",
                              "Timeout (s) of connection used by underlying VISA driver")
 
+        # Error checking (QueryErrorAfterCommand)
+        self.AddProperty("query_error_after_command", False, Boolean).AddAttribute(OpenTap.DisplayAttribute,
+                                                                                   "Error Checking",
+                                                                                   "Query for errors after each SCPI "
+                                                                                   "command",
+                                                                                   Groups=["Debug"])
+        # Send VI clear on connect
+        self.AddProperty("send_clear_on_connect", True, Boolean).AddAttribute(OpenTap.DisplayAttribute,
+                                                                              "Send Clear On Connect",
+                                                                              "When connecting to the instrument, "
+                                                                              "clear the SCPI state, including any "
+                                                                              "errors in the error queue",
+                                                                              Groups=["Debug"])
+
+        # Verbose SCPI logging
+        self.AddProperty("verbose_logging_enabled", True, Boolean).AddAttribute(OpenTap.DisplayAttribute,
+                                                                                "Verbose SCPI Logging",
+                                                                                "Enables suppress_log_messages logging of SCPI "
+                                                                                "communication",
+                                                                                Groups=["Debug"])
+
     def Open(self):
         self._io.VisaAddress = self.visa_address
         self._io.IoTimeout = self.io_timeout
+        self._io.QueryErrorAfterCommand = self.query_error_after_command
+        self._io.SendClearOnConnect = self.send_clear_on_connect
+        self._io.VerboseLoggingEnabled = self.verbose_logging_enabled
         self._io.Open()
         self.Info("{} IO session opened.".format(self.Name))
 
@@ -70,7 +94,13 @@ class PyScpiInstrument(Instrument):
         :param verbose: Flag for enabling/suppressing log messages.
         :return: SCPI response string.
         """
-        return self._io.ScpiQuery(query, not verbose)
+        try:
+            return self._io.ScpiQuery(query, not verbose)
+        except Exception as e:
+            errors = self.QueryErrors()
+            if errors:
+                raise Exception("{} errors: {}".format(self.Name, errors))
+            raise e
 
     def ScpiCommand(self, command: str):
         """
@@ -78,7 +108,13 @@ class PyScpiInstrument(Instrument):
         :param command: SCPI command string.
         :return: None
         """
-        return self._io.ScpiCommand(command)
+        try:
+            return self._io.ScpiCommand(command)
+        except Exception as e:
+            errors = self.QueryErrors()
+            if errors:
+                raise Exception("{} errors: {}".format(self.Name, errors))
+            raise e
 
     def QueryBinaryValues(self, query: str, datatype: str):
         """
@@ -103,20 +139,31 @@ class PyScpiInstrument(Instrument):
         :param data: binary data to be sent in the SCPI command
         """
 
-        maxSize = 1e9
         self._io.ScpiIEEEBlockCommand(command, data)
 
-    def QueryErrors(self, verbose: bool = True, max_errors: int = 1000):
+    # def QueryErrors(self, verbose: bool = True, max_errors: int = 1000):
+    #     """
+    #     Return all errors on the instrument error stack. Clear the list in the same call.
+    #     :param verbose: Flag for suppressing log messages. If false the errors will not be logged.
+    #     :param max_errors: Max number of errors to retrieve. Useful if instrument generates errors faster than they can be read.
+    #     :return: List of all errors on the instrument error stack.
+    #     """
+    #     scpi_errors = self._io.QueryErrors(not verbose, max_errors)
+    #     # OpenTap.ScpiInstrument.QueryErrors returns a list of OpenTap.ScpiInstrument.ScpiErrors
+    #     # ScpiErrors have an int error code and string message
+    #     # Concatenate all the strings together to return something that can be consumed by TestStep.Error
+    #     return ','.join(["{} - {}".format(err.Code, err.Message) for err in scpi_errors])
+
+    def QueryErrors(self, suppress_log_messages: bool = False, max_errors: int = 1000):
         """
         Return all errors on the instrument error stack. Clear the list in the same call.
-        :param verbose: Flag for suppressing log messages. If false the errors will not be logged.
+        :param suppress_log_messages: Flag for suppressing log messages. If false the errors will not be logged.
         :param max_errors: Max number of errors to retrieve. Useful if instrument generates errors faster than they can be read.
         :return: List of all errors on the instrument error stack.
         """
-        scpi_errors = self._io.QueryErrors(not verbose, max_errors)
+        scpi_errors = self._io.QueryErrors(suppress_log_messages, max_errors)
         # OpenTap.ScpiInstrument.QueryErrors returns a list of OpenTap.ScpiInstrument.ScpiErrors
         # ScpiErrors have an int error code and string message
-        # Concatenate all the strings together to return something that can be consumed by TestStep.Error
         return ','.join(["{} - {}".format(err.Code, err.Message) for err in scpi_errors])
 
     def WaitForOperationComplete(self, timeout_ms: int = 5000):
